@@ -5,6 +5,7 @@ mod k8s;
 mod output;
 mod playbook;
 mod version;
+mod progress;
 
 use std::{env, process, str};
 
@@ -14,6 +15,7 @@ use aws_types::region::Region;
 use clap::{Args, Parser, Subcommand};
 use clap_verbosity_flag::Verbosity;
 use serde::{Deserialize, Serialize};
+use progress::ProgressTracker;
 
 #[derive(Parser, Debug)]
 #[command(author, about, version)]
@@ -98,6 +100,7 @@ pub async fn analyze(args: &Analysis) -> Result<()> {
   // All checks and validations on input should happen above/before running the analysis
   let results = analysis::analyze(&aws_config, &cluster).await?;
   output::output(&results, &args.format, &args.output).await?;
+  progress_tracker.set_progress(75);
 
   Ok(())
 }
@@ -118,6 +121,8 @@ async fn get_config(region: &Option<String>) -> Result<aws_config::SdkConfig> {
 pub async fn create(args: &Create) -> Result<()> {
   match &args.command {
     CreateCommands::Playbook(playbook) => {
+      // start the progress tracker
+      let progress_tracker = ProgressTracker::new();
       // Query Kubernetes first so that we can get AWS details that require them
       let aws_config = get_config(&playbook.region.to_owned()).await?;
       let region = aws_config.region().unwrap().to_string();
@@ -132,12 +137,15 @@ pub async fn create(args: &Create) -> Result<()> {
         return Ok(());
       }
 
+      progress_tracker.set_progress(25);
       let results = analysis::analyze(&aws_config, &cluster).await?;
+      progress_tracker.set_progress(50);
 
       if let Err(err) = playbook::create(playbook, region, &cluster, results) {
         eprintln!("{err}");
         process::exit(2);
       }
+      progress_tracker.finish();
     }
   }
 
